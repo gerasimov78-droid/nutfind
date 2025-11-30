@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magnet Finder</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            max-width: 400px;
+            margin: 50px auto;
+            padding: 20px;
+            text-align: center;
+            background: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .field-value {
+            font-size: 48px;
+            font-weight: bold;
+            color: #007AFF;
+            margin: 20px 0;
+        }
+        
+        .status {
+            font-size: 18px;
+            color: #666;
+            margin: 10px 0;
+        }
+        
+        button {
+            background: #007AFF;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 18px;
+            border-radius: 10px;
+            margin: 10px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .strength-bar {
+            width: 100%;
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+        
+        .strength-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #FFC107, #F44336);
+            width: 0%;
+            transition: width 0.1s;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧲 Magnet Finder</h1>
+        
+        <button id="connectBtn" onclick="connect()">Connect to Device</button>
+        <button id="disconnectBtn" onclick="disconnect()" disabled style="display:none;">Disconnect</button>
+        
+        <div class="status" id="status">Not connected</div>
+        
+        <div class="field-value" id="fieldValue">--</div>
+        <div style="font-size: 14px; color: #999;">µT (microtesla)</div>
+        
+        <div class="strength-bar">
+            <div class="strength-fill" id="strengthBar"></div>
+        </div>
+        
+        <div class="status" id="message"></div>
+    </div>
+
+    <script>
+        const SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
+        const CHAR_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
+        
+        let device = null;
+        let characteristic = null;
+        let audioContext = null;
+        let oscillator = null;
+        
+        async function connect() {
+            try {
+                document.getElementById('status').textContent = 'Searching...';
+                
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [SERVICE_UUID] }]
+                });
+                
+                document.getElementById('status').textContent = 'Connecting...';
+                
+                const server = await device.getGATTServer().connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                characteristic = await service.getCharacteristic(CHAR_UUID);
+                
+                await characteristic.startNotifications();
+                characteristic.addEventListener('characteristicvaluechanged', handleData);
+                
+                document.getElementById('status').textContent = 'Connected!';
+                document.getElementById('connectBtn').style.display = 'none';
+                document.getElementById('disconnectBtn').style.display = 'inline-block';
+                document.getElementById('disconnectBtn').disabled = false;
+                
+                // Инициализация аудио
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('status').textContent = 'Connection failed!';
+            }
+        }
+        
+        function handleData(event) {
+            const value = new TextDecoder().decode(event.target.value);
+            const fieldStrength = parseFloat(value);
+            
+            document.getElementById('fieldValue').textContent = fieldStrength.toFixed(1);
+            
+            // Обновление полосы
+            const percentage = Math.min((fieldStrength / 150) * 100, 100);
+            document.getElementById('strengthBar').style.width = percentage + '%';
+            
+            // Сообщения
+            let message = '';
+            if (fieldStrength > 100) {
+                message = '🔥 VERY CLOSE!';
+            } else if (fieldStrength > 70) {
+                message = '⚡ Getting closer!';
+            } else if (fieldStrength > 55) {
+                message = '✓ Signal detected';
+            }
+            document.getElementById('message').textContent = message;
+            
+            // Звук (частота растёт с полем)
+            playTone(fieldStrength);
+        }
+        
+        function playTone(fieldStrength) {
+            if (!audioContext) return;
+            
+            // Частота от 200Hz (слабое поле) до 1000Hz (сильное поле)
+            const baseFreq = 200;
+            const maxFreq = 1000;
+            const frequency = baseFreq + ((fieldStrength - 40) / 110) * (maxFreq - baseFreq);
+            const clampedFreq = Math.max(baseFreq, Math.min(maxFreq, frequency));
+            
+            if (fieldStrength > 50) {
+                if (!oscillator) {
+                    oscillator = audioContext.createOscillator();
+                    const gainNode = audioContext.createGain();
+                    oscillator.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+                    gainNode.gain.value = 0.3;
+                    oscillator.start();
+                }
+                oscillator.frequency.value = clampedFreq;
+            } else {
+                if (oscillator) {
+                    oscillator.stop();
+                    oscillator = null;
+                }
+            }
+        }
+        
+        function disconnect() {
+            if (device && device.gatt.connected) {
+                device.gatt.disconnect();
+            }
+            
+            if (oscillator) {
+                oscillator.stop();
+                oscillator = null;
+            }
+            
+            document.getElementById('status').textContent = 'Disconnected';
+            document.getElementById('fieldValue').textContent = '--';
+            document.getElementById('strengthBar').style.width = '0%';
+            document.getElementById('message').textContent = '';
+            document.getElementById('connectBtn').style.display = 'inline-block';
+            document.getElementById('disconnectBtn').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
