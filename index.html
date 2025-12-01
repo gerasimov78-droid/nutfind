@@ -280,10 +280,10 @@
             
             const baseFreq = 200;
             const maxFreq = 1000;
-            const frequency = baseFreq + ((fieldStrength - 40) / 110) * (maxFreq - baseFreq);
+            const frequency = baseFreq + ((fieldStrength - 150) / 50) * (maxFreq - baseFreq);
             const clampedFreq = Math.max(baseFreq, Math.min(maxFreq, frequency));
             
-            if (fieldStrength > 50) {
+            if (fieldStrength > 150) {
                 if (!oscillator) {
                     oscillator = audioContext.createOscillator();
                     gainNode = audioContext.createGain();
