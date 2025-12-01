@@ -5,50 +5,62 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Magnet Finder</title>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-            max-width: 400px;
-            margin: 50px auto;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             padding: 20px;
-            text-align: center;
-            background: #f5f5f5;
         }
         
         .container {
             background: white;
             border-radius: 20px;
-            padding: 30px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 400px;
+            width: 100%;
         }
         
-        h1 {
-            color: #333;
+        .logo {
+            text-align: center;
+            font-size: 48px;
             margin-bottom: 10px;
         }
         
-        .field-value {
-            font-size: 48px;
-            font-weight: bold;
-            color: #007AFF;
-            margin: 20px 0;
-        }
-        
-        .status {
-            font-size: 18px;
-            color: #666;
-            margin: 10px 0;
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 28px;
         }
         
         button {
-            background: #007AFF;
+            width: 100%;
+            background: #667eea;
             color: white;
             border: none;
-            padding: 15px 30px;
+            padding: 18px;
             font-size: 18px;
-            border-radius: 10px;
-            margin: 10px;
+            border-radius: 12px;
             cursor: pointer;
             font-weight: 600;
+            transition: all 0.3s;
+            margin-bottom: 15px;
+        }
+        
+        button:hover:not(:disabled) {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
         
         button:disabled {
@@ -56,40 +68,107 @@
             cursor: not-allowed;
         }
         
+        .status {
+            text-align: center;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: 500;
+        }
+        
+        .status.disconnected {
+            background: #fee;
+            color: #c33;
+        }
+        
+        .status.connected {
+            background: #efe;
+            color: #3c3;
+        }
+        
+        .status.searching {
+            background: #fef3cd;
+            color: #856404;
+        }
+        
+        .field-display {
+            text-align: center;
+            margin: 30px 0;
+        }
+        
+        .field-value {
+            font-size: 64px;
+            font-weight: bold;
+            color: #667eea;
+            line-height: 1;
+        }
+        
+        .field-unit {
+            font-size: 18px;
+            color: #999;
+            margin-top: 5px;
+        }
+        
         .strength-bar {
             width: 100%;
-            height: 30px;
-            background: #e0e0e0;
-            border-radius: 15px;
+            height: 40px;
+            background: #f0f0f0;
+            border-radius: 20px;
             overflow: hidden;
             margin: 20px 0;
+            position: relative;
         }
         
         .strength-fill {
             height: 100%;
             background: linear-gradient(90deg, #4CAF50, #FFC107, #F44336);
             width: 0%;
-            transition: width 0.1s;
+            transition: width 0.2s;
+        }
+        
+        .message {
+            text-align: center;
+            font-size: 20px;
+            font-weight: 600;
+            min-height: 30px;
+            margin: 15px 0;
+        }
+        
+        .debug {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            font-size: 12px;
+            font-family: monospace;
+            max-height: 200px;
+            overflow-y: auto;
+            color: #666;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🧲 Magnet Finder</h1>
+        <div class="logo">🧲</div>
+        <h1>Magnet Finder</h1>
         
         <button id="connectBtn" onclick="connect()">Connect to Device</button>
-        <button id="disconnectBtn" onclick="disconnect()" disabled style="display:none;">Disconnect</button>
+        <button id="disconnectBtn" onclick="disconnect()" style="display:none;">Disconnect</button>
         
-        <div class="status" id="status">Not connected</div>
+        <div class="status disconnected" id="status">Not connected</div>
         
-        <div class="field-value" id="fieldValue">--</div>
-        <div style="font-size: 14px; color: #999;">µT (microtesla)</div>
+        <div class="field-display">
+            <div class="field-value" id="fieldValue">--</div>
+            <div class="field-unit">µT</div>
+        </div>
         
         <div class="strength-bar">
             <div class="strength-fill" id="strengthBar"></div>
         </div>
         
-        <div class="status" id="message"></div>
+        <div class="message" id="message"></div>
+        
+        <div class="debug" id="debug">Debug log:</div>
     </div>
 
     <script>
@@ -100,67 +179,105 @@
         let characteristic = null;
         let audioContext = null;
         let oscillator = null;
+        let gainNode = null;
+        
+        function log(message) {
+            const debug = document.getElementById('debug');
+            const timestamp = new Date().toLocaleTimeString();
+            debug.innerHTML += `\n[${timestamp}] ${message}`;
+            debug.scrollTop = debug.scrollHeight;
+            console.log(message);
+        }
         
         async function connect() {
             try {
-                document.getElementById('status').textContent = 'Searching...';
+                log('Starting connection...');
+                updateStatus('Searching...', 'searching');
+                
+                // Проверка поддержки Web Bluetooth
+                if (!navigator.bluetooth) {
+                    throw new Error('Web Bluetooth not supported in this browser');
+                }
+                
+                log('Requesting device...');
                 
                 device = await navigator.bluetooth.requestDevice({
-                    filters: [{ services: [SERVICE_UUID] }]
+                    filters: [{ services: [SERVICE_UUID] }],
+                    optionalServices: [SERVICE_UUID]
                 });
                 
-                document.getElementById('status').textContent = 'Connecting...';
+                log(`Device selected: ${device.name}`);
+                updateStatus('Connecting...', 'searching');
                 
-                const server = await device.getGATTServer().connect();
+                device.addEventListener('gattserverdisconnected', onDisconnected);
+                
+                log('Connecting to GATT Server...');
+                const server = await device.gatt.connect();
+                log('GATT Server connected');
+                
+                log('Getting service...');
                 const service = await server.getPrimaryService(SERVICE_UUID);
-                characteristic = await service.getCharacteristic(CHAR_UUID);
+                log('Service obtained');
                 
+                log('Getting characteristic...');
+                characteristic = await service.getCharacteristic(CHAR_UUID);
+                log('Characteristic obtained');
+                
+                log('Starting notifications...');
                 await characteristic.startNotifications();
                 characteristic.addEventListener('characteristicvaluechanged', handleData);
+                log('Notifications started');
                 
-                document.getElementById('status').textContent = 'Connected!';
+                updateStatus('Connected!', 'connected');
                 document.getElementById('connectBtn').style.display = 'none';
-                document.getElementById('disconnectBtn').style.display = 'inline-block';
-                document.getElementById('disconnectBtn').disabled = false;
+                document.getElementById('disconnectBtn').style.display = 'block';
                 
                 // Инициализация аудио
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                log('Audio context created');
                 
             } catch (error) {
-                console.error('Error:', error);
-                document.getElementById('status').textContent = 'Connection failed!';
+                log(`ERROR: ${error.message}`);
+                updateStatus(`Failed: ${error.message}`, 'disconnected');
+                console.error('Connection error:', error);
             }
         }
         
         function handleData(event) {
-            const value = new TextDecoder().decode(event.target.value);
-            const fieldStrength = parseFloat(value);
-            
-            document.getElementById('fieldValue').textContent = fieldStrength.toFixed(1);
-            
-            // Обновление полосы
-            const percentage = Math.min((fieldStrength / 150) * 100, 100);
-            document.getElementById('strengthBar').style.width = percentage + '%';
-            
-            // Сообщения
-            let message = '';
-            if (fieldStrength > 100) {
-                message = '🔥 VERY CLOSE!';
-            } else if (fieldStrength > 70) {
-                message = '⚡ Getting closer!';
-            } else if (fieldStrength > 55) {
-                message = '✓ Signal detected';
+            try {
+                const value = new TextDecoder().decode(event.target.value);
+                const fieldStrength = parseFloat(value);
+                
+                log(`Received: ${fieldStrength} µT`);
+                
+                document.getElementById('fieldValue').textContent = fieldStrength.toFixed(1);
+                
+                // Обновление полосы
+                const percentage = Math.min((fieldStrength / 150) * 100, 100);
+                document.getElementById('strengthBar').style.width = percentage + '%';
+                
+                // Сообщения
+                let message = '';
+                if (fieldStrength > 100) {
+                    message = '🔥 VERY CLOSE!';
+                } else if (fieldStrength > 70) {
+                    message = '⚡ Getting closer!';
+                } else if (fieldStrength > 55) {
+                    message = '✓ Signal detected';
+                }
+                document.getElementById('message').textContent = message;
+                
+                // Звук
+                playTone(fieldStrength);
+                
+            } catch (error) {
+                log(`Data handling error: ${error.message}`);
             }
-            document.getElementById('message').textContent = message;
-            
-            // Звук (частота растёт с полем)
-            playTone(fieldStrength);
         }
         
         function playTone(fieldStrength) {
             if (!audioContext) return;
             
-            // Частота от 200Hz (слабое поле) до 1000Hz (сильное поле)
             const baseFreq = 200;
             const maxFreq = 1000;
             const frequency = baseFreq + ((fieldStrength - 40) / 110) * (maxFreq - baseFreq);
@@ -169,22 +286,35 @@
             if (fieldStrength > 50) {
                 if (!oscillator) {
                     oscillator = audioContext.createOscillator();
-                    const gainNode = audioContext.createGain();
+                    gainNode = audioContext.createGain();
                     oscillator.connect(gainNode);
                     gainNode.connect(audioContext.destination);
                     gainNode.gain.value = 0.3;
+                    oscillator.type = 'sine';
                     oscillator.start();
+                    log('Audio started');
                 }
                 oscillator.frequency.value = clampedFreq;
             } else {
                 if (oscillator) {
                     oscillator.stop();
                     oscillator = null;
+                    log('Audio stopped');
                 }
             }
         }
         
+        function onDisconnected() {
+            log('Device disconnected');
+            disconnect();
+        }
+        
         function disconnect() {
+            if (characteristic) {
+                characteristic.removeEventListener('characteristicvaluechanged', handleData);
+                characteristic = null;
+            }
+            
             if (device && device.gatt.connected) {
                 device.gatt.disconnect();
             }
@@ -194,13 +324,52 @@
                 oscillator = null;
             }
             
-            document.getElementById('status').textContent = 'Disconnected';
+            updateStatus('Disconnected', 'disconnected');
             document.getElementById('fieldValue').textContent = '--';
             document.getElementById('strengthBar').style.width = '0%';
             document.getElementById('message').textContent = '';
-            document.getElementById('connectBtn').style.display = 'inline-block';
+            document.getElementById('connectBtn').style.display = 'block';
             document.getElementById('disconnectBtn').style.display = 'none';
+            
+            log('Disconnected and cleaned up');
         }
+        
+        function updateStatus(text, className) {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            status.className = `status ${className}`;
+        }
+        
+        // Проверка поддержки при загрузке
+        window.addEventListener('load', () => {
+            if (!navigator.bluetooth) {
+                updateStatus('Web Bluetooth not supported', 'disconnected');
+                document.getElementById('connectBtn').disabled = true;
+                log('ERROR: Web Bluetooth not supported in this browser');
+            } else {
+                log('Web Bluetooth is supported');
+            }
+        });
     </script>
 </body>
 </html>
+```
+
+5. Нажмите **"Commit changes"**
+
+---
+
+### 3. Порядок действий для теста:
+
+**После прошивки кода и обновления HTML:**
+
+1. **Перезагрузите ESP32** (кнопка RESET)
+
+2. **Откройте Serial Monitor** (с USB подключенным) - должно быть:
+```
+=== Starting Magnet Finder ===
+Sensor OK
+Initializing BLE...
+BLE started successfully!
+Device name: MagnetFinder
+Waiting for connection...
